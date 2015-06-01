@@ -1,1 +1,1 @@
-This translator translates Ordnance Survey Vector Map Local .gz files that contains GML into **Shape** or **TAB format**
+This translator translates Ordnance Survey Vector Map Local .gz files that contain GML into **Shape** or **TAB format**
