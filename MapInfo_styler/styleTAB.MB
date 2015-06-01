@@ -1,0 +1,311 @@
+Include "MapBasic.def"
+
+Define OS_NATIONAL_GRID 8, 79, "m", -2, 49, 0.9996012717, 400000, -100000
+Define INDIR ApplicationDirectory$()
+
+Declare Sub main
+Declare Sub process_AREA_LINE_POINT(ByVal featClass As String)
+Declare Sub process_TEXT(ByVal featClass As String)
+Declare Sub process_ROAD_CL
+
+Dim filename, tabPathname, tabFilename, infileFeatDesc As String
+Dim i, numrows, infileFeatCode As Integer
+Dim infileObj, styleObj As Object
+
+Dim x1, y1, x2, y2 As Float
+
+Dim vmlLayerGroup As String
+Dim vmlLayerGroup_ As Alias
+
+Dim	 nSegm, nNode, nNumSegms, nNumNodes As Integer, fX, fY As Float
+
+Sub main
+
+	CLS
+	Close All
+	Set ProgressBars Off
+	Set CoordSys Earth Projection OS_NATIONAL_GRID
+
+	Open File INDIR + "filelist.txt" For Input as #1
+	Open Table INDIR + "vmlStyle_lookup.TAB" As vmlStyle_lookup
+
+	Line Input #1, filename
+	Do While Not EOF(1)
+		tabFilename = PathToTableName$(filename)
+		If tabFilename = "Area" Or tabFilename Like "%\_Area" Escape "\" Then Call process_AREA_LINE_POINT("Area") End If
+		If tabFilename = "Line" Or tabFilename Like "%\_Line" Escape "\" Then Call process_AREA_LINE_POINT("Line") End If
+		If tabFilename = "VectorMapPoint" Or tabFilename Like "%\_VectorMapPoint" Escape "\" Then Call process_AREA_LINE_POINT("VectorMapPoint") End If
+		If tabFilename = "Text" Or tabFilename Like "%\_Text" Escape "\" Then Call process_TEXT("Text") End If
+		If tabFilename = "RoadCLine" Or tabFilename Like "%\_RoadCLine" Escape "\" Then Call process_ROAD_CL End If
+		Line Input #1, filename
+	Loop
+
+	Close All
+	Note "All Done"
+
+End Sub
+
+Sub process_AREA_LINE_POINT(ByVal featClass As String)
+
+	Dim b_fillstyle As Brush
+	Dim p_linestyle As Pen
+	Dim s_pointstyle As Symbol
+
+	Open Table filename As infile
+
+	tabPathname = PathToDirectory$(filename)
+	tabFilename = PathToTableName$(filename)
+
+	Select layerGroup From vmlStyle_lookup Where featureClass = featClass And layerGroup <> "" Into vmlStyle_lookup_select_ Group By COL1 NoSelect
+	numrows = TableInfo(vmlStyle_lookup_select_,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From vmlStyle_lookup_select_
+		vmlLayerGroup = vmlStyle_lookup_select_.layerGroup
+		vmlLayerGroup_ = vmlLayerGroup
+		Create Table vmlLayerGroup_ Using infile
+		 File tabPathname + tabFilename + "_" + vmlLayerGroup + ".TAB"
+		Create Map For vmlLayerGroup_ CoordSys Earth Projection OS_NATIONAL_GRID
+	Next
+
+	numrows = TableInfo(infile,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From infile
+		CLS
+		Print "Processing File: " + filename + " [" + i + "/" + numrows + "]"
+
+		infileFeatDesc = infile.featureDescription
+		infileObj = infile.Obj
+
+		Select * From vmlStyle_lookup Where featureDescription = infileFeatDesc And layerGroup <> "" Into vmlStyle_lookup_select NoSelect
+
+		If TableInfo(vmlStyle_lookup_select, TAB_INFO_NROWS) > 0 Then
+			vmlLayerGroup = vmlStyle_lookup_select.layerGroup
+			vmlLayerGroup_ = vmlLayerGroup
+
+			styleObj = vmlStyle_lookup_select.Obj
+
+			If InStr(1, filename, "Area") > 0 Then
+				b_fillstyle = ObjectInfo(styleObj, OBJ_INFO_BRUSH)
+				p_linestyle = ObjectInfo(styleObj, OBJ_INFO_PEN)
+				Alter Object infileObj Info OBJ_INFO_BRUSH, b_fillstyle
+				Alter Object infileObj Info OBJ_INFO_PEN, p_linestyle
+			ElseIf InStr(1, filename, "Line") > 0 Then
+				p_linestyle = ObjectInfo(styleObj, OBJ_INFO_PEN)
+				Alter Object infileObj Info OBJ_INFO_PEN, p_linestyle
+			ElseIf InStr(1, filename, "VectorMapPoint") > 0 Then
+				x1 = CentroidX(MBR(styleObj))
+				y1 = CentroidY(MBR(styleObj))
+
+				x2 = CentroidX(infileObj)
+				y2 = CentroidY(infileObj)
+
+				infileObj = styleObj
+
+				nNumSegms	= ObjectInfo(infileObj, OBJ_INFO_NPOLYGONS)
+				For nSegm = 1 To nNumSegms
+					nNumNodes	= ObjectInfo(infileObj, OBJ_INFO_NPOLYGONS + nSegm)
+					If ObjectInfo(infileObj, OBJ_INFO_TYPE) = 7 Then
+						nNumNodes = nNumNodes-1
+					End If
+					For nNode = 1 To nNumNodes
+						fX	= ObjectNodeX(infileObj, nSegm, nNode)
+						fY	= ObjectNodeY(infileObj, nSegm, nNode)
+						Alter Object infileObj Node Set Position nSegm, nNode ((fX - x1) + x2, (fY - y1) + y2)
+					Next
+				Next
+				infileObj = Rotate(infileObj, infile.orientation)
+			End If
+
+			Update infile Set Obj = infileObj Where Rowid = i
+
+			Select * From infile Where Rowid = i Into infile_select
+			Insert Into vmlLayerGroup_ Select * From infile_select
+
+		End If
+	Next
+
+	numrows = TableInfo(vmlStyle_lookup_select_,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From vmlStyle_lookup_select_
+		vmlLayerGroup = vmlStyle_lookup_select_.layerGroup
+		Commit Table vmlLayerGroup
+		Close Table vmlLayerGroup
+	Next
+
+	Drop Table infile
+
+End Sub
+
+Sub process_TEXT(ByVal featClass As String)
+
+	Dim txtHgt, txtAng As Float
+	Dim txtStr As String
+	Dim txtAnc As Integer
+	Dim txtObj As Object
+	Dim t_textstyle As Font
+
+	Open Table filename As infile
+
+	tabPathname = PathToDirectory$(filename)
+	tabFilename = PathToTableName$(filename)
+
+	Select layerGroup From vmlStyle_lookup Where featureClass = featClass And layerGroup <> "" Into vmlStyle_lookup_select_ Group By COL1 NoSelect
+	numrows = TableInfo(vmlStyle_lookup_select_,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From vmlStyle_lookup_select_
+		vmlLayerGroup = vmlStyle_lookup_select_.layerGroup
+		vmlLayerGroup_ = vmlLayerGroup
+		Create Table vmlLayerGroup_ Using infile
+		 File tabPathname + tabFilename + "_" + vmlLayerGroup + ".TAB"
+		Create Map For vmlLayerGroup_ CoordSys Earth Projection OS_NATIONAL_GRID
+	Next
+
+	numrows = TableInfo(infile,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From infile
+		CLS
+		Print "Processing File: " + filename + " [" + i + "/" + numrows + "]"
+
+		infileFeatDesc = infile.featureDescription
+		infileObj = infile.Obj
+		x1 = CentroidX(infileObj)
+		y1 = CentroidY(infileObj)
+
+		txtStr = infile.textString
+		txtHgt = infile.height
+		txtAng = infile.orientation
+		txtAnc = infile.anchorPosition
+
+		Select * From vmlStyle_lookup Where featureDescription = infileFeatDesc And layerGroup <> "" Into vmlStyle_lookup_select NoSelect
+
+		If TableInfo(vmlStyle_lookup_select, TAB_INFO_NROWS) > 0 Then
+			vmlLayerGroup = vmlStyle_lookup_select.layerGroup
+			vmlLayerGroup_ = vmlLayerGroup
+
+			styleObj = vmlStyle_lookup_select.Obj
+
+			t_textstyle = ObjectInfo(styleObj, OBJ_INFO_TEXTFONT)
+
+			x2 = x1+(Len(txtStr)*(txtHgt/2))
+			y2 = y1-(txtHgt)
+
+			Do Case txtAnc
+				Case 0
+					x1 = x1
+					y1 = y1+txtHgt
+				Case 1
+					x1 = x1
+					y1 = y1+(txtHgt/2)
+				Case 2
+					x1 = x1
+					y1 = y1
+				Case 3
+					x1 = x1-((x2-x1)/2)
+					y1 = y1+txtHgt
+				Case 4
+					x1 = x1-((x2-x1)/2)
+					y1 = y1+(txtHgt/2)
+				Case 5
+					x1 = x1-((x2-x1)/2)
+					y1 = y1
+				Case 6
+					x1 = x1-(x2-x1)
+					y1 = y1+txtHgt
+				Case 7
+					x1 = x1-(x2-x1)
+					y1 = y1+(txtHgt/2)
+				Case 8
+					x1 = x1-(x2-x1)
+					y1 = y1
+			End Case
+
+			x2 = x1+(Len(txtStr)*(txtHgt/2))
+			y2 = y1-(txtHgt)
+
+			Create Region Into Variable txtObj 1 5 (x1,y1) (x1,y2) (x2,y2) (x2,y1) (x1,y1)
+			txtObj = Rotate(txtObj, txtAng)
+
+			x1 = ObjectNodeX(txtObj, 1, 1)
+			y1 = ObjectNodeY(txtObj, 1, 1)
+
+			x2 = x1+(Len(txtStr)*(txtHgt/2))
+			y2 = y1-(txtHgt)
+
+			Create Text Into Variable txtObj txtStr (x1,y1) (x2,y2) Font t_textstyle Angle txtAng
+			Update infile Set Obj = txtObj Where Rowid = i
+
+			Select * From infile Where Rowid = i Into infile_select
+			Insert Into vmlLayerGroup_ Select * From infile_select
+
+		End If
+	Next
+
+	numrows = TableInfo(vmlStyle_lookup_select_,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From vmlStyle_lookup_select_
+		vmlLayerGroup = vmlStyle_lookup_select_.layerGroup
+		Commit Table vmlLayerGroup
+		Close Table vmlLayerGroup
+	Next
+
+	Drop Table infile
+
+End Sub
+
+Sub process_ROAD_CL
+
+	Dim bufWidth As Float
+	Dim bufObj As Object
+	Dim b_fillstyle As Brush
+	Dim p_linestyle As Pen
+
+	Open Table filename As infile
+
+	numrows = TableInfo(infile,TAB_INFO_NROWS)
+	For i = 1 To numrows
+	Fetch Rec i From infile
+		CLS
+		Print "Processing File: " + filename + " [" + i + "/" + numrows + "]"
+
+		infileFeatDesc = infile.featureDescription
+		infileObj = ConvertToPline(infile.Obj)
+
+		Select * From vmlStyle_lookup Where featureDescription = infileFeatDesc Into vmlStyle_lookup_select NoSelect
+		styleObj = vmlStyle_lookup_select.Obj
+
+		bufWidth = vmlStyle_lookup_select.bufferWidth
+		bufObj = Buffer(infileObj, 25, bufWidth, "m")
+
+		b_fillstyle = ObjectInfo(styleObj, OBJ_INFO_BRUSH)
+		p_linestyle = ObjectInfo(styleObj, OBJ_INFO_PEN)
+		Alter Object bufObj Info OBJ_INFO_BRUSH, b_fillstyle
+		Alter Object bufObj Info OBJ_INFO_PEN, p_linestyle
+
+		Update infile Set Obj = bufObj Where Rowid = i
+
+	Next
+
+	Commit Table infile
+
+	tabPathname = PathToDirectory$(filename)
+	tabFilename = PathToTableName$(filename)
+
+	Open File tabPathname + tabFilename + "_.TAB" For Output As #2
+	Print #2, "!table"
+	Print #2, "!version 450"
+	Print #2, "Open Table """ + tabFilename + ".TAB"" As _" + tabFilename + " Interactive"
+	Print #2, ""
+	Print #2, "Definition Table"
+	Print #2, "  Type QUERY"
+	Close File #2
+
+	Open File tabPathname + tabFilename + "_.QRY" For Output As #3
+	Print #3, "Fields { * }"
+	Print #3, "Tables { _" + tabFilename + " }"
+	Print #3, "Order { featureCode desc }"
+	Print #3, "Into { " + tabFilename + " }"
+	Close File #3
+
+	Close Table infile
+
+End Sub

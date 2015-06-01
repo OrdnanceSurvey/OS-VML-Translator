@@ -1,0 +1,9 @@
+('C:\\Users\\TJMartin\\Downloads\\VMLTranslator-Windows\\Windows\\final_version\\dist\\vml_translator_v1.2.exe',
+ False,
+ False,
+ 'C:\\Users\\TJMartin\\Downloads\\VMLTranslator-Windows\\Windows\\final_version\\os_logo.ico',
+ None,
+ [],
+ None,
+ False,
+ 1429273701L)

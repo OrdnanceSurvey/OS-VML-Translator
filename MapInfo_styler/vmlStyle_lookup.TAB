@@ -1,0 +1,12 @@
+!table
+!version 450
+!charset WindowsLatin1
+
+Definition Table
+  Type NATIVE Charset "WindowsLatin1"
+  Fields 5
+    featureClass Char (14) ;
+    featureCode Integer ;
+    featureDescription Char (43) ;
+    layerGroup Char (27) ;
+    bufferWidth Decimal (8, 2) ;
